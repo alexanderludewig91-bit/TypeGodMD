@@ -15,8 +15,52 @@ import {
   FileType,
   ChevronUp,
   Trash2,
+  Image,
+  FileText,
+  FileCode,
+  FileJson,
+  FileSpreadsheet,
+  Presentation,
 } from "lucide-react";
-import { useAppStore, FileNode } from "../../stores/appStore";
+import { useAppStore, FileNode, getFileType, getOfficeType } from "../../stores/appStore";
+
+// Get icon for file based on extension
+function getFileIcon(fileName: string) {
+  const fileType = getFileType(fileName);
+  const ext = fileName.toLowerCase().split(".").pop() || "";
+  
+  switch (fileType) {
+    case "markdown":
+      return <FileText className="w-4 h-4 text-blue-400" />;
+    case "image":
+      return <Image className="w-4 h-4 text-green-400" />;
+    case "pdf":
+      return <FileType className="w-4 h-4 text-red-400" />;
+    case "office":
+      const officeType = getOfficeType(fileName);
+      if (officeType === "word") {
+        return <FileText className="w-4 h-4 text-blue-500" />;
+      }
+      if (officeType === "excel") {
+        return <FileSpreadsheet className="w-4 h-4 text-green-500" />;
+      }
+      if (officeType === "powerpoint") {
+        return <Presentation className="w-4 h-4 text-orange-500" />;
+      }
+      return <File className="w-4 h-4 text-blue-400" />;
+    case "text":
+      // More specific icons for certain text files
+      if (["json", "jsonc"].includes(ext)) {
+        return <FileJson className="w-4 h-4 text-yellow-400" />;
+      }
+      if (["js", "ts", "tsx", "jsx", "css", "html", "xml"].includes(ext)) {
+        return <FileCode className="w-4 h-4 text-orange-400" />;
+      }
+      return <File className="w-4 h-4 text-gray-400" />;
+    default:
+      return <File className="w-4 h-4 text-dark-text-muted" />;
+  }
+}
 import { loadDirectoryChildren, createFile, createDirectory, renameFile, fileExists } from "../../services/fileSystem";
 import { isTrashFolder } from "../../services/trash";
 import FileContextMenu from "./FileContextMenu";
@@ -594,7 +638,6 @@ function FileTreeNode({
   const [isLoading, setIsLoading] = useState(false);
 
   const isSelected = selectedFile === node.path;
-  const isMarkdown = node.name.endsWith(".md");
   const isBeingDragged = draggedNode?.path === node.path;
   const isDropTarget = dropTarget === node.path && node.isDirectory;
 
@@ -709,11 +752,7 @@ function FileTreeNode({
               <Folder className="w-4 h-4 text-yellow-500" />
             )
           ) : (
-            <File
-              className={`w-4 h-4 ${
-                isMarkdown ? "text-blue-400" : "text-dark-text-muted"
-              }`}
-            />
+            getFileIcon(node.name)
           )}
         </span>
 

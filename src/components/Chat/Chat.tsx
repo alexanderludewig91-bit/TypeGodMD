@@ -1,8 +1,31 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Trash2, Bot, User, Loader2, File, Folder } from "lucide-react";
+import { Send, Trash2, Bot, User, Loader2, File, Folder, ChevronDown, GitCompare, Zap } from "lucide-react";
 import { useAppStore, FileNode } from "../../stores/appStore";
 import { sendChatMessage } from "../../services/openai";
 import ReactMarkdown from "react-markdown";
+
+// Available GPT models
+const AVAILABLE_MODELS = [
+  // GPT-5 Modelle
+  { id: "gpt-5.2", name: "GPT-5.2", description: "Neuestes & bestes Modell" },
+  { id: "gpt-5.2-mini", name: "GPT-5.2 Mini", description: "Schnell & sehr leistungsstark" },
+  { id: "gpt-5", name: "GPT-5", description: "Leistungsstärkstes Modell" },
+  { id: "gpt-5-mini", name: "GPT-5 Mini", description: "Schnell & leistungsstark" },
+  // GPT-4.1 Modelle
+  { id: "gpt-4.1", name: "GPT-4.1", description: "Neuestes GPT-4 Modell" },
+  { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", description: "Günstig & leistungsstark" },
+  { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", description: "Schnellstes Modell" },
+  // GPT-4o Modelle
+  { id: "gpt-4o", name: "GPT-4o", description: "Multimodal, schnell" },
+  { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "Günstig & schnell" },
+  // Reasoning Modelle
+  { id: "o3-mini", name: "o3 Mini", description: "Neues Reasoning-Modell" },
+  { id: "o1", name: "o1", description: "Starkes Reasoning" },
+  { id: "o1-mini", name: "o1 Mini", description: "Schnelles Reasoning" },
+  // Ältere Modelle
+  { id: "gpt-4-turbo", name: "GPT-4 Turbo", description: "Bewährt & stabil" },
+  { id: "gpt-3.5-turbo", name: "GPT-3.5", description: "Günstigste Option" },
+];
 
 interface MentionSuggestion {
   name: string;
@@ -18,12 +41,17 @@ export default function Chat() {
     clearChat,
     apiKey,
     selectedModel,
+    setSelectedModel,
     currentProject,
     openFile,
     refreshFileTree,
     reloadOpenFiles,
     fileTree,
     addPendingChange,
+    diffModeEnabled,
+    setDiffModeEnabled,
+    openFiles,
+    mcpServers,
   } = useAppStore();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -36,6 +64,21 @@ export default function Chat() {
   const [mentionStartPos, setMentionStartPos] = useState(0);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const mentionListRef = useRef<HTMLDivElement>(null);
+  
+  // Model selector dropdown state
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setShowModelDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -121,18 +164,33 @@ export default function Chat() {
         apiKey,
         model: selectedModel,
         projectPath: currentProject?.path,
+        mcpServers: mcpServers.filter(s => s.enabled),
         onFileCreated: async (filePath) => {
           console.log("File created:", filePath);
           await refreshFileTree();
           await openFile(filePath);
         },
-        onProposedChange: async (change) => {
+        // Called when file is updated directly (without diff mode)
+        onFileUpdated: async (filePath, newContent) => {
+          console.log("File updated directly:", filePath);
+          // Check if file is currently open
+          const isFileOpen = openFiles.some(f => f.path === filePath);
+          if (isFileOpen) {
+            // Close and reopen to force editor refresh with new content
+            const { closeFile } = useAppStore.getState();
+            closeFile(filePath);
+          }
+          // Open the file (will load fresh content from disk)
+          await openFile(filePath);
+        },
+        // Only use diff mode if enabled
+        onProposedChange: diffModeEnabled ? async (change) => {
           console.log("Proposed change:", change);
           // Add pending change to store
           addPendingChange(change);
           // Open the file so user can see the diff
           await openFile(change.filePath);
-        },
+        } : undefined,
       });
 
       addChatMessage({ role: "assistant", content: response });
@@ -400,9 +458,75 @@ export default function Chat() {
             API-Key fehlt. Bitte in den Einstellungen hinzufügen.
           </p>
         )}
-        <p className="text-xs text-dark-text-muted mt-1.5 opacity-60">
-          Tippe <kbd className="px-1 py-0.5 bg-dark-panel rounded text-[10px]">@</kbd> um Dateien zu erwähnen
-        </p>
+        
+        {/* Toolbar */}
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-dark-border/50">
+          {/* Model Selector */}
+          <div className="relative" ref={modelDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setShowModelDropdown(!showModelDropdown)}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs text-dark-text-muted hover:text-dark-text hover:bg-dark-hover rounded transition-colors"
+            >
+              <span className="font-medium">
+                {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}
+              </span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${showModelDropdown ? "rotate-180" : ""}`} />
+            </button>
+            
+            {showModelDropdown && (
+              <div className="absolute bottom-full left-0 mb-1 w-48 bg-dark-sidebar border border-dark-border rounded-lg shadow-xl overflow-hidden z-50">
+                <div className="px-3 py-1.5 text-xs text-dark-text-muted border-b border-dark-border bg-dark-panel/50">
+                  Modell wählen
+                </div>
+                {AVAILABLE_MODELS.map((model) => (
+                  <button
+                    key={model.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedModel(model.id);
+                      setShowModelDropdown(false);
+                    }}
+                    className={`w-full flex flex-col px-3 py-2 text-left transition-colors ${
+                      selectedModel === model.id
+                        ? "bg-dark-active text-white"
+                        : "text-dark-text hover:bg-dark-hover"
+                    }`}
+                  >
+                    <span className="text-sm font-medium">{model.name}</span>
+                    <span className={`text-xs ${selectedModel === model.id ? "text-white/70" : "text-dark-text-muted"}`}>
+                      {model.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          
+          {/* Diff Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setDiffModeEnabled(!diffModeEnabled)}
+            className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${
+              diffModeEnabled
+                ? "text-dark-accent bg-dark-accent/10 hover:bg-dark-accent/20"
+                : "text-dark-text-muted hover:text-dark-text hover:bg-dark-hover"
+            }`}
+            title={diffModeEnabled ? "Diff-Ansicht aktiv: Änderungen müssen bestätigt werden" : "Direkt-Modus: Änderungen werden sofort angewendet"}
+          >
+            {diffModeEnabled ? (
+              <>
+                <GitCompare className="w-3.5 h-3.5" />
+                <span>Diff</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-3.5 h-3.5" />
+                <span>Direkt</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

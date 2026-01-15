@@ -11,16 +11,19 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-store = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
 regex = "1"
+reqwest = { version = "0.12", features = ["json"] }
+urlencoding = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

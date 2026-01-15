@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { McpServerConfig } from "../services/mcp";
 
 export interface Project {
   id: string;
@@ -23,11 +24,38 @@ export interface FileNode {
   metadata?: FileMetadata;
 }
 
+export type FileType = "markdown" | "image" | "pdf" | "office" | "text" | "unknown";
+
 export interface OpenFile {
   path: string;
   name: string;
   content: string;
+  binaryContent?: Uint8Array;  // For binary files like Office documents
   isDirty: boolean;
+  fileType: FileType;
+}
+
+// Helper to detect file type from extension
+export function getFileType(filename: string): FileType {
+  const ext = filename.toLowerCase().split(".").pop() || "";
+  
+  if (ext === "md" || ext === "markdown") return "markdown";
+  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico"].includes(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"].includes(ext)) return "office";
+  if (["txt", "json", "js", "ts", "tsx", "jsx", "css", "html", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "log", "csv"].includes(ext)) return "text";
+  
+  return "unknown";
+}
+
+// Get specific office file type
+export function getOfficeType(filename: string): "word" | "excel" | "powerpoint" | "other" {
+  const ext = filename.toLowerCase().split(".").pop() || "";
+  
+  if (["doc", "docx", "odt"].includes(ext)) return "word";
+  if (["xls", "xlsx", "ods", "csv"].includes(ext)) return "excel";
+  if (["ppt", "pptx", "odp"].includes(ext)) return "powerpoint";
+  return "other";
 }
 
 export interface ChatMessage {
@@ -72,7 +100,7 @@ interface AppState {
   openFile: (path: string) => Promise<void>;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
-  updateFileContent: (path: string, content: string) => void;
+  updateFileContent: (path: string, content: string, markDirty?: boolean) => void;
   saveFile: (path: string) => Promise<void>;
   reloadOpenFiles: () => Promise<void>;
 
@@ -103,6 +131,15 @@ interface AppState {
   setApiKey: (key: string) => void;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
+  diffModeEnabled: boolean;
+  setDiffModeEnabled: (enabled: boolean) => void;
+  
+  // MCP Settings
+  mcpServers: McpServerConfig[];
+  setMcpServers: (servers: McpServerConfig[]) => void;
+  addMcpServer: (server: McpServerConfig) => void;
+  updateMcpServer: (id: string, updates: Partial<McpServerConfig>) => void;
+  removeMcpServer: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -115,11 +152,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     // Load settings
     const storedApiKey = localStorage.getItem("openai_api_key") || "";
     const storedModel = localStorage.getItem("selected_model") || "gpt-4o";
+    const storedDiffMode = localStorage.getItem("diff_mode_enabled");
+    const diffModeEnabled = storedDiffMode === null ? true : storedDiffMode === "true";
+    
+    // Load MCP servers
+    let mcpServers: McpServerConfig[] = [];
+    try {
+      const storedMcpServers = localStorage.getItem("mcp_servers");
+      if (storedMcpServers) {
+        mcpServers = JSON.parse(storedMcpServers);
+      }
+    } catch {
+      mcpServers = [];
+    }
     
     set({ 
       initialized: true,
       apiKey: storedApiKey,
       selectedModel: storedModel,
+      diffModeEnabled,
+      mcpServers,
     });
   },
 
@@ -242,12 +294,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     try {
+      const name = path.split("/").pop() || path;
+      const fileType = getFileType(name);
+      
+      // For images and PDFs, we don't need to read content - just store the path
+      if (fileType === "image" || fileType === "pdf") {
+        set({
+          openFiles: [...get().openFiles, { path, name, content: "", isDirty: false, fileType }],
+          activeFile: path,
+          selectedFile: path,
+        });
+        return;
+      }
+      
+      // For Office files, read as binary
+      if (fileType === "office") {
+        const { readFile } = await import("@tauri-apps/plugin-fs");
+        const binaryContent = await readFile(path);
+        
+        set({
+          openFiles: [...get().openFiles, { path, name, content: "", binaryContent, isDirty: false, fileType }],
+          activeFile: path,
+          selectedFile: path,
+        });
+        return;
+      }
+      
+      // For text-based files, read the content
       const { readTextFile } = await import("../services/fileSystem");
       const content = await readTextFile(path);
-      const name = path.split("/").pop() || path;
       
       set({
-        openFiles: [...get().openFiles, { path, name, content, isDirty: false }],
+        openFiles: [...get().openFiles, { path, name, content, isDirty: false, fileType }],
         activeFile: path,
         selectedFile: path,
       });
@@ -266,10 +344,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ openFiles: files, activeFile: newActive });
   },
   setActiveFile: (path) => set({ activeFile: path, selectedFile: path }),
-  updateFileContent: (path, content) => {
+  updateFileContent: (path, content, markDirty = true) => {
     set({
       openFiles: get().openFiles.map((f) =>
-        f.path === path ? { ...f, content, isDirty: true } : f
+        f.path === path ? { ...f, content, isDirty: markDirty } : f
       ),
     });
   },
@@ -388,5 +466,34 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedModel: (model) => {
     localStorage.setItem("selected_model", model);
     set({ selectedModel: model });
+  },
+  diffModeEnabled: true,
+  setDiffModeEnabled: (enabled) => {
+    localStorage.setItem("diff_mode_enabled", String(enabled));
+    set({ diffModeEnabled: enabled });
+  },
+  
+  // MCP Settings
+  mcpServers: [],
+  setMcpServers: (servers) => {
+    localStorage.setItem("mcp_servers", JSON.stringify(servers));
+    set({ mcpServers: servers });
+  },
+  addMcpServer: (server) => {
+    const servers = [...get().mcpServers, server];
+    localStorage.setItem("mcp_servers", JSON.stringify(servers));
+    set({ mcpServers: servers });
+  },
+  updateMcpServer: (id, updates) => {
+    const servers = get().mcpServers.map(s => 
+      s.id === id ? { ...s, ...updates } : s
+    );
+    localStorage.setItem("mcp_servers", JSON.stringify(servers));
+    set({ mcpServers: servers });
+  },
+  removeMcpServer: (id) => {
+    const servers = get().mcpServers.filter(s => s.id !== id);
+    localStorage.setItem("mcp_servers", JSON.stringify(servers));
+    set({ mcpServers: servers });
   },
 }));

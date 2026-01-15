@@ -37,7 +37,6 @@ function computeDiff(original: string, modified: string): DiffLine[] {
   }
   
   // Backtrack to build diff
-  const diff: DiffLine[] = [];
   let i = m, j = n;
   const result: DiffLine[] = [];
   

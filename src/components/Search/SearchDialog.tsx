@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, File, X, Loader2 } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
-import { searchSemantic, cosineSimilarity, generateEmbedding } from "../../services/openai";
+import { cosineSimilarity, generateEmbedding } from "../../services/openai";
 import { readTextFile } from "../../services/fileSystem";
 
 interface SearchResult {

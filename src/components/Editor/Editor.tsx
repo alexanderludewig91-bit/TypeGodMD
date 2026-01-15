@@ -1,11 +1,37 @@
 import { useState } from "react";
-import { X, FileText, Eye, Edit3, Columns, GitCompare } from "lucide-react";
+import { X, FileText, Code, BookOpen, GitCompare, Image, FileType2, File, FileSpreadsheet } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import MarkdownEditor from "./MarkdownEditor";
-import MarkdownPreview from "./MarkdownPreview";
+import WysiwygEditor from "./WysiwygEditor";
+import ImageViewer from "./ImageViewer";
+import PDFViewer from "./PDFViewer";
+import OfficeViewer from "./OfficeViewer";
 import DiffView from "../DiffView";
+import type { FileType } from "../../stores/appStore";
 
-type ViewMode = "edit" | "preview" | "split";
+type ViewMode = "wysiwyg" | "source";
+
+// Get icon for file type
+function getFileIcon(fileType: FileType, hasPendingChange: boolean) {
+  if (hasPendingChange) {
+    return <GitCompare className="w-4 h-4 text-yellow-500" />;
+  }
+  
+  switch (fileType) {
+    case "markdown":
+      return <FileText className="w-4 h-4 text-blue-400" />;
+    case "image":
+      return <Image className="w-4 h-4 text-green-400" />;
+    case "pdf":
+      return <FileType2 className="w-4 h-4 text-red-400" />;
+    case "office":
+      return <FileSpreadsheet className="w-4 h-4 text-blue-500" />;
+    case "text":
+      return <Code className="w-4 h-4 text-yellow-400" />;
+    default:
+      return <File className="w-4 h-4 text-dark-text-muted" />;
+  }
+}
 
 export default function Editor() {
   const { 
@@ -19,7 +45,7 @@ export default function Editor() {
     rejectPendingChange,
     pendingChanges,
   } = useAppStore();
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [viewMode, setViewMode] = useState<ViewMode>("wysiwyg");
 
   const activeFileData = openFiles.find((f) => f.path === activeFile);
   const pendingChange = activeFile ? getPendingChangeForFile(activeFile) : undefined;
@@ -83,11 +109,7 @@ export default function Editor() {
                     : "bg-dark-sidebar text-dark-text-muted hover:bg-dark-hover"
                 } ${hasPendingChange ? "border-t-2 border-t-yellow-500" : ""}`}
               >
-                {hasPendingChange ? (
-                  <GitCompare className="w-4 h-4 text-yellow-500" />
-                ) : (
-                  <FileText className="w-4 h-4" />
-                )}
+                {getFileIcon(file.fileType, hasPendingChange)}
                 <span className="truncate max-w-[150px]">{file.name}</span>
                 {file.isDirty && !hasPendingChange && (
                   <span className="w-2 h-2 rounded-full bg-white" />
@@ -108,42 +130,33 @@ export default function Editor() {
           })}
         </div>
 
-        {/* View Mode Toggle */}
-        <div className="flex items-center gap-1 px-2 border-l border-dark-border">
-          <button
-            onClick={() => setViewMode("edit")}
-            className={`p-1.5 rounded transition-colors ${
-              viewMode === "edit"
-                ? "bg-dark-active text-white"
-                : "text-dark-text-muted hover:bg-dark-hover hover:text-dark-text"
-            }`}
-            title="Editor"
-          >
-            <Edit3 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setViewMode("split")}
-            className={`p-1.5 rounded transition-colors ${
-              viewMode === "split"
-                ? "bg-dark-active text-white"
-                : "text-dark-text-muted hover:bg-dark-hover hover:text-dark-text"
-            }`}
-            title="Split-Ansicht"
-          >
-            <Columns className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setViewMode("preview")}
-            className={`p-1.5 rounded transition-colors ${
-              viewMode === "preview"
-                ? "bg-dark-active text-white"
-                : "text-dark-text-muted hover:bg-dark-hover hover:text-dark-text"
-            }`}
-            title="Vorschau"
-          >
-            <Eye className="w-4 h-4" />
-          </button>
-        </div>
+        {/* View Mode Toggle - only for markdown files */}
+        {activeFileData?.fileType === "markdown" && (
+          <div className="flex items-center gap-1 px-2 border-l border-dark-border">
+            <button
+              onClick={() => setViewMode("wysiwyg")}
+              className={`p-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                viewMode === "wysiwyg"
+                  ? "bg-dark-active text-white"
+                  : "text-dark-text-muted hover:bg-dark-hover hover:text-dark-text"
+              }`}
+              title="WYSIWYG Editor (wie Obsidian)"
+            >
+              <BookOpen className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("source")}
+              className={`p-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                viewMode === "source"
+                  ? "bg-dark-active text-white"
+                  : "text-dark-text-muted hover:bg-dark-hover hover:text-dark-text"
+              }`}
+              title="Quellcode Ansicht"
+            >
+              <Code className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Editor Content */}
@@ -157,28 +170,50 @@ export default function Editor() {
               onReject={() => rejectPendingChange(pendingChange.id)}
             />
           ) : (
-            <div className="flex-1 flex overflow-hidden">
-              {(viewMode === "edit" || viewMode === "split") && (
-                <div
-                  className={`${
-                    viewMode === "split" ? "w-1/2 border-r border-dark-border" : "w-full"
-                  } overflow-hidden`}
-                >
+            <div className="flex-1 overflow-hidden">
+              {/* Render based on file type */}
+              {activeFileData.fileType === "image" && (
+                <ImageViewer
+                  filePath={activeFileData.path}
+                  fileName={activeFileData.name}
+                />
+              )}
+              
+              {activeFileData.fileType === "pdf" && (
+                <PDFViewer
+                  filePath={activeFileData.path}
+                  fileName={activeFileData.name}
+                />
+              )}
+              
+              {activeFileData.fileType === "office" && (
+                <OfficeViewer
+                  filePath={activeFileData.path}
+                  fileName={activeFileData.name}
+                  binaryContent={activeFileData.binaryContent}
+                />
+              )}
+              
+              {activeFileData.fileType === "markdown" && (
+                viewMode === "wysiwyg" ? (
+                  <WysiwygEditor
+                    key={activeFileData.path}
+                    content={activeFileData.content}
+                    filePath={activeFileData.path}
+                  />
+                ) : (
                   <MarkdownEditor
                     content={activeFileData.content}
                     filePath={activeFileData.path}
                   />
-                </div>
+                )
               )}
-
-              {(viewMode === "preview" || viewMode === "split") && (
-                <div
-                  className={`${
-                    viewMode === "split" ? "w-1/2" : "w-full"
-                  } overflow-auto p-6`}
-                >
-                  <MarkdownPreview content={activeFileData.content} />
-                </div>
+              
+              {(activeFileData.fileType === "text" || activeFileData.fileType === "unknown") && (
+                <MarkdownEditor
+                  content={activeFileData.content}
+                  filePath={activeFileData.path}
+                />
               )}
             </div>
           )}
