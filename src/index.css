@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar for dark mode */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4f4f4f;
+}
+
+/* Prevent text selection during resize */
+.select-none {
+  user-select: none;
+}
+
+/* Custom focus styles */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid #0e639c;
+  outline-offset: -2px;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Markdown content styles */
+.markdown-content {
+  @apply text-dark-text leading-relaxed;
+}
+
+.markdown-content h1 {
+  @apply text-2xl font-semibold mb-4 mt-6 text-white border-b border-dark-border pb-2;
+}
+
+.markdown-content h2 {
+  @apply text-xl font-semibold mb-3 mt-5 text-white;
+}
+
+.markdown-content h3 {
+  @apply text-lg font-semibold mb-2 mt-4 text-white;
+}
+
+.markdown-content p {
+  @apply mb-4;
+}
+
+.markdown-content ul, .markdown-content ol {
+  @apply mb-4 pl-6;
+}
+
+.markdown-content li {
+  @apply mb-1;
+}
+
+.markdown-content code {
+  @apply bg-dark-panel px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-dark-panel p-4 rounded-lg mb-4 overflow-x-auto;
+}
+
+.markdown-content pre code {
+  @apply bg-transparent p-0;
+}
+
+.markdown-content blockquote {
+  @apply border-l-4 border-dark-accent pl-4 italic text-dark-text-muted mb-4;
+}
+
+.markdown-content a {
+  @apply text-blue-400 hover:text-blue-300 underline;
+}
+
+.markdown-content table {
+  @apply w-full mb-4 border-collapse;
+}
+
+.markdown-content th, .markdown-content td {
+  @apply border border-dark-border px-3 py-2 text-left;
+}
+
+.markdown-content th {
+  @apply bg-dark-panel font-semibold;
+}
+
+.markdown-content input[type="checkbox"] {
+  @apply mr-2;
+}
+
+/* Resizable panels */
+.resize-handle {
+  @apply bg-dark-border hover:bg-dark-accent transition-colors cursor-col-resize;
+  width: 4px;
+}
+
+.resize-handle:hover {
+  width: 4px;
+}
