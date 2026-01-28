@@ -34,6 +34,12 @@ interface ChatOptions {
   onProposedChange?: (change: ProposedChange) => void;
 }
 
+interface StreamingChatOptions extends ChatOptions {
+  onToken: (token: string, fullText: string) => void;
+  onToolCall?: (toolName: string) => void;
+  abortSignal?: AbortSignal;
+}
+
 // Define the tools/functions the AI can use
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -205,23 +211,21 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
-  {
-    type: "function",
-    function: {
-      name: "web_search",
-      description: "Sucht im Internet nach Informationen. Nutze dies um aktuelle Informationen zu finden oder Fakten zu überprüfen.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Der Suchbegriff oder die Frage für die Internet-Suche",
-          },
-        },
-        required: ["query"],
-      },
-    },
-  },
+  // Web-Suche temporär deaktiviert
+  // {
+  //   type: "function",
+  //   function: {
+  //     name: "web_search",
+  //     description: "Sucht im Internet nach Informationen.",
+  //     parameters: {
+  //       type: "object",
+  //       properties: {
+  //         query: { type: "string", description: "Der Suchbegriff" },
+  //       },
+  //       required: ["query"],
+  //     },
+  //   },
+  // },
 ];
 
 const SYSTEM_PROMPT = `Du bist ein hilfreicher KI-Assistent für Wissensmanagement. Du hilfst dem Benutzer beim Erstellen, Bearbeiten und Organisieren von Markdown-Notizen.
@@ -236,9 +240,8 @@ Du hast Zugriff auf folgende Funktionen:
 - delete_file: Löscht eine Datei (verschiebt in Papierkorb)
 - list_files: Listet Dateien im Projekt auf
 - search_content: Durchsucht Dateien nach Inhalten
-- web_search: Sucht im Internet nach aktuellen Informationen
 
-WICHTIG:
+WICHTIG FÜR AKTIONEN:
 - Wenn der Benutzer dich bittet, eine Datei zu erstellen, nutze IMMER die create_file Funktion
 - Wenn der Benutzer einen ORDNER erstellen will, nutze create_folder
 - Wenn der Benutzer eine Datei UMBENENNEN will, nutze rename_file (NICHT update_file!)
@@ -247,6 +250,19 @@ WICHTIG:
 - Wenn der Benutzer nach Dateien fragt, nutze list_files oder read_file
 - Verwende aussagekräftige Dateinamen in kebab-case (z.B. meine-notiz.md)
 - Beginne jede neue Datei mit einem H1-Titel
+
+WICHTIG FÜR ANTWORTEN:
+- Halte deine Antworten KURZ und PRÄGNANT
+- Nach einer Dateiänderung: Bestätige nur kurz was du gemacht hast (z.B. "Ich habe das Gedicht in sammlung.md ergänzt.")
+- Wiederhole NICHT den kompletten Inhalt der Änderung in deiner Antwort - der Benutzer sieht die Änderungen im Editor
+- Frage NIEMALS "Soll ich die Änderung übernehmen?" - der Benutzer entscheidet selbst über Annehmen/Ablehnen im Editor
+- Frage NIEMALS "Soll ich das für dich speichern?" - das macht der Benutzer selbst
+- Biete keine Aktionen an die du nicht ausführen kannst (wie Änderungen annehmen)
+
+ANTWORTSTIL:
+- Kurz und freundlich
+- Bestätige erledigte Aufgaben mit einem Satz
+- Bei Fragen: Antworte direkt und hilfreich
 - Antworte auf Deutsch, es sei denn, der Benutzer schreibt in einer anderen Sprache`;
 
 // Helper to get all files recursively
@@ -547,15 +563,18 @@ export async function sendChatMessage(options: ChatOptions): Promise<string> {
     contextInfo = `\n\nAktuelles Projektverzeichnis: ${projectPath}`;
   }
 
+  // Models that don't support function calling / tools
+  const noToolsModels = ["o1", "o1-mini", "o1-preview", "o3", "o3-mini"];
+  const supportsTools = !noToolsModels.some(m => model.startsWith(m));
+
   // Get MCP tools if any servers are connected
-  const mcpTools = getAllTools();
+  const mcpTools = supportsTools ? getAllTools() : [];
   const mcpToolsForOpenAI = mcpToolsToOpenAI(mcpTools);
   
   // Combine built-in tools with MCP tools
-  const allTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
-    ...tools, 
-    ...mcpToolsForOpenAI as OpenAI.Chat.Completions.ChatCompletionTool[]
-  ];
+  const allTools: OpenAI.Chat.Completions.ChatCompletionTool[] = supportsTools 
+    ? [...tools, ...mcpToolsForOpenAI as OpenAI.Chat.Completions.ChatCompletionTool[]]
+    : [];
   
   // Add MCP tools info to system message if available
   let mcpInfo = "";
@@ -566,18 +585,36 @@ export async function sendChatMessage(options: ChatOptions): Promise<string> {
 
   const systemMessage = SYSTEM_PROMPT + contextInfo + mcpInfo;
 
-  // Initial request with tools
-  let response = await openai.chat.completions.create({
+  // Check if model uses new API (max_completion_tokens instead of max_tokens)
+  const usesNewApi = model.startsWith("gpt-5") || model.startsWith("o1") || model.startsWith("o3");
+
+  // Build request options based on model capabilities
+  const requestOptions: Record<string, unknown> = {
     model,
     messages: [
       { role: "system", content: systemMessage },
       ...messages,
     ],
-    tools: allTools.length > 0 ? allTools : undefined,
-    tool_choice: allTools.length > 0 ? "auto" : undefined,
-    temperature: 0.7,
-    max_tokens: 2000,
-  });
+  };
+
+  // Use correct token parameter based on model
+  if (usesNewApi) {
+    requestOptions.max_completion_tokens = 2000;
+  } else {
+    requestOptions.max_tokens = 2000;
+  }
+
+  // Only add tools and temperature for models that support them
+  if (supportsTools) {
+    requestOptions.tools = allTools.length > 0 ? allTools : undefined;
+    requestOptions.tool_choice = allTools.length > 0 ? "auto" : undefined;
+    requestOptions.temperature = 0.7;
+  }
+
+  // Initial request
+  let response = await openai.chat.completions.create(
+    requestOptions as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+  );
 
   let assistantMessage = response.choices[0]?.message;
   const conversationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -612,20 +649,212 @@ export async function sendChatMessage(options: ChatOptions): Promise<string> {
       });
     }
 
-    // Get next response
-    response = await openai.chat.completions.create({
+    // Get next response - use correct token parameter for model
+    const nextRequestOptions: Record<string, unknown> = {
       model,
       messages: conversationMessages,
       tools,
       tool_choice: "auto",
       temperature: 0.7,
-      max_tokens: 2000,
-    });
+    };
+    
+    if (usesNewApi) {
+      nextRequestOptions.max_completion_tokens = 2000;
+    } else {
+      nextRequestOptions.max_tokens = 2000;
+    }
+    
+    response = await openai.chat.completions.create(
+      nextRequestOptions as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+    );
 
     assistantMessage = response.choices[0]?.message;
   }
 
   return assistantMessage?.content || "Keine Antwort erhalten.";
+}
+
+/**
+ * Streaming version of sendChatMessage - tokens are sent progressively
+ */
+export async function sendChatMessageStreaming(options: StreamingChatOptions): Promise<string> {
+  const { messages, apiKey, model, projectPath, onFileCreated, onToken, onToolCall } = options;
+  
+  const openai = new OpenAI({
+    apiKey,
+    dangerouslyAllowBrowser: true,
+  });
+
+  let contextInfo = "";
+  if (projectPath) {
+    contextInfo = `\n\nAktuelles Projektverzeichnis: ${projectPath}`;
+  }
+
+  // Models that don't support function calling / tools
+  const noToolsModels = ["o1", "o1-mini", "o1-preview", "o3", "o3-mini"];
+  const supportsTools = !noToolsModels.some(m => model.startsWith(m));
+
+  // Get MCP tools if supported
+  const mcpTools = supportsTools ? getAllTools() : [];
+  const mcpToolsForOpenAI = mcpToolsToOpenAI(mcpTools);
+  
+  const allTools: OpenAI.Chat.Completions.ChatCompletionTool[] = supportsTools 
+    ? [...tools, ...mcpToolsForOpenAI as OpenAI.Chat.Completions.ChatCompletionTool[]]
+    : [];
+
+  let mcpInfo = "";
+  if (mcpTools.length > 0) {
+    const serverNames = [...new Set(mcpTools.map(t => t.serverName))];
+    mcpInfo = `\n\nVerfügbare externe Tools (MCP): ${serverNames.join(", ")}`;
+  }
+
+  const systemMessage = SYSTEM_PROMPT + contextInfo + mcpInfo;
+  
+  // Check if model uses new API
+  const usesNewApi = model.startsWith("gpt-5") || model.startsWith("o1") || model.startsWith("o3");
+
+  // Build request options
+  const requestOptions: Record<string, unknown> = {
+    model,
+    messages: [
+      { role: "system", content: systemMessage },
+      ...messages,
+    ],
+    stream: true,
+  };
+
+  if (usesNewApi) {
+    requestOptions.max_completion_tokens = 2000;
+  } else {
+    requestOptions.max_tokens = 2000;
+  }
+
+  if (supportsTools && allTools.length > 0) {
+    requestOptions.tools = allTools;
+    requestOptions.tool_choice = "auto";
+    requestOptions.temperature = 0.7;
+  }
+
+  let fullText = "";
+  const { abortSignal } = options;
+  
+  try {
+    // First, make a non-streaming request to check for tool calls
+    const initialOptions: Record<string, unknown> = {
+      ...requestOptions,
+      stream: false,
+    };
+    
+    const initialResponse = await openai.chat.completions.create(
+      initialOptions as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+      { signal: abortSignal }
+    );
+    
+    const assistantMessage = initialResponse.choices[0]?.message;
+    
+    // If there are tool calls, process them (non-streaming for simplicity)
+    if (assistantMessage?.tool_calls && assistantMessage.tool_calls.length > 0) {
+      const toolResults: Array<{ tool_call_id: string; content: string }> = [];
+      
+      for (const toolCall of assistantMessage.tool_calls) {
+        if (abortSignal?.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        
+        if (onToolCall) {
+          onToolCall(toolCall.function.name);
+        }
+        
+        // Show status
+        const statusMsg = `*${toolCall.function.name}...*\n`;
+        onToken(statusMsg, fullText + statusMsg);
+        fullText += statusMsg;
+        
+        // Execute tool
+        const result = await processToolCall(toolCall, projectPath || "", options);
+        toolResults.push({ tool_call_id: toolCall.id, content: result });
+        
+        // Notify file creation
+        if (toolCall.function.name === "create_file" && result.includes("erfolgreich erstellt")) {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            if (onFileCreated) {
+              onFileCreated(`${projectPath}/${args.file_path}`);
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      
+      // Follow-up request WITHOUT tools (prevents loops)
+      fullText = "";
+      onToken("", "");
+      
+      const followUpOptions: Record<string, unknown> = {
+        model,
+        messages: [
+          { role: "system", content: systemMessage },
+          ...messages,
+          {
+            role: "assistant",
+            content: assistantMessage.content || null,
+            tool_calls: assistantMessage.tool_calls,
+          },
+          ...toolResults.map(tr => ({
+            role: "tool",
+            tool_call_id: tr.tool_call_id,
+            content: tr.content,
+          })),
+        ],
+        stream: true,
+        // NO tools here!
+      };
+      
+      if (usesNewApi) {
+        followUpOptions.max_completion_tokens = 2000;
+      } else {
+        followUpOptions.max_tokens = 2000;
+      }
+      
+      const followUpStream = await openai.chat.completions.create(
+        followUpOptions as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+        { signal: abortSignal }
+      );
+      
+      for await (const chunk of followUpStream) {
+        if (abortSignal?.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          fullText += content;
+          onToken(content, fullText);
+        }
+      }
+    } else {
+      // No tool calls - just stream the content directly
+      // We already have the response, so display it with simulated streaming
+      const content = assistantMessage?.content || "";
+      const words = content.split(/(\s+)/);
+      
+      for (const word of words) {
+        if (abortSignal?.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        fullText += word;
+        onToken(word, fullText);
+        // Small delay for streaming effect
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+    
+    return fullText || "Keine Antwort erhalten.";
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(errorMsg);
+  }
 }
 
 export async function generateEmbedding(

@@ -325,3 +325,94 @@ body {
 .office-content img {
   @apply max-w-full my-4 rounded;
 }
+
+/* Chat Markdown Styling */
+.chat-markdown {
+  @apply text-sm leading-relaxed;
+}
+
+.chat-markdown p {
+  @apply mb-3 last:mb-0;
+}
+
+.chat-markdown h1 {
+  @apply text-lg font-bold mb-3 mt-4 first:mt-0 text-white;
+}
+
+.chat-markdown h2 {
+  @apply text-base font-bold mb-2 mt-3 first:mt-0 text-white;
+}
+
+.chat-markdown h3 {
+  @apply text-sm font-semibold mb-2 mt-3 first:mt-0 text-white;
+}
+
+.chat-markdown ul, .chat-markdown ol {
+  @apply mb-3 pl-5 space-y-1;
+}
+
+.chat-markdown ul {
+  @apply list-disc;
+}
+
+.chat-markdown ol {
+  @apply list-decimal;
+}
+
+.chat-markdown li {
+  @apply pl-1;
+}
+
+.chat-markdown li > ul, .chat-markdown li > ol {
+  @apply mt-1 mb-0;
+}
+
+.chat-markdown code:not(pre code) {
+  @apply bg-dark-bg/50 px-1.5 py-0.5 rounded text-xs font-mono text-blue-300;
+}
+
+.chat-markdown pre {
+  @apply bg-dark-bg rounded-lg p-3 mb-3 overflow-x-auto;
+}
+
+.chat-markdown pre code {
+  @apply text-xs font-mono text-gray-300;
+}
+
+.chat-markdown blockquote {
+  @apply border-l-4 border-dark-accent pl-4 py-1 my-3 italic text-dark-text-muted;
+}
+
+.chat-markdown table {
+  @apply w-full border-collapse mb-3 text-xs;
+}
+
+.chat-markdown th {
+  @apply bg-dark-bg/50 px-3 py-2 text-left font-semibold text-white border border-dark-border;
+}
+
+.chat-markdown td {
+  @apply px-3 py-2 border border-dark-border;
+}
+
+.chat-markdown strong {
+  @apply font-semibold text-white;
+}
+
+.chat-markdown em {
+  @apply italic;
+}
+
+.chat-markdown a {
+  @apply text-blue-400 hover:text-blue-300 underline;
+}
+
+.chat-markdown hr {
+  @apply border-dark-border my-4;
+}
+
+/* Streaming cursor animation */
+.streaming-cursor::after {
+  content: '▌';
+  @apply text-dark-accent animate-pulse;
+}

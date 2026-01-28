@@ -6,7 +6,7 @@ import WysiwygEditor from "./WysiwygEditor";
 import ImageViewer from "./ImageViewer";
 import PDFViewer from "./PDFViewer";
 import OfficeViewer from "./OfficeViewer";
-import DiffView from "../DiffView";
+import InlineDiffEditor from "./InlineDiffEditor";
 import type { FileType } from "../../stores/appStore";
 
 type ViewMode = "wysiwyg" | "source";
@@ -42,6 +42,7 @@ export default function Editor() {
     saveFile,
     getPendingChangeForFile,
     acceptPendingChange,
+    acceptPendingChangeWithContent,
     rejectPendingChange,
     pendingChanges,
   } = useAppStore();
@@ -161,16 +162,24 @@ export default function Editor() {
 
       {/* Editor Content */}
       {activeFileData && (
-        <>
-          {/* Show DiffView if there are pending changes for this file */}
-          {pendingChange ? (
-            <DiffView
-              change={pendingChange}
-              onAccept={() => acceptPendingChange(pendingChange.id)}
-              onReject={() => rejectPendingChange(pendingChange.id)}
+        <div className="flex-1 overflow-hidden">
+          {/* Show inline diff editor for markdown files with pending changes */}
+          {pendingChange && activeFileData.fileType === "markdown" ? (
+            <InlineDiffEditor
+              content={activeFileData.content}
+              pendingChange={pendingChange}
+              filePath={activeFileData.path}
+              onContentChange={(content) => {
+                // Update the file content in store
+                const { updateFileContent } = useAppStore.getState();
+                updateFileContent(activeFileData.path, content);
+              }}
+              onAcceptChange={() => acceptPendingChange(pendingChange.id)}
+              onRejectChange={() => rejectPendingChange(pendingChange.id)}
+              onAcceptWithContent={(content) => acceptPendingChangeWithContent(pendingChange.id, content)}
             />
           ) : (
-            <div className="flex-1 overflow-hidden">
+            <>
               {/* Render based on file type */}
               {activeFileData.fileType === "image" && (
                 <ImageViewer
@@ -215,9 +224,9 @@ export default function Editor() {
                   filePath={activeFileData.path}
                 />
               )}
-            </div>
+            </>
           )}
-        </>
+        </div>
       )}
     </div>
   );

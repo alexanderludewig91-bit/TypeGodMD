@@ -1,30 +1,18 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { Send, Trash2, Bot, User, Loader2, File, Folder, ChevronDown, GitCompare, Zap } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { Send, Trash2, Bot, Loader2, File, Folder, ChevronDown, GitCompare, Zap, Square } from "lucide-react";
 import { useAppStore, FileNode } from "../../stores/appStore";
 import { sendChatMessage } from "../../services/openai";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { Components } from "react-markdown";
 
 // Available GPT models
 const AVAILABLE_MODELS = [
-  // GPT-5 Modelle
-  { id: "gpt-5.2", name: "GPT-5.2", description: "Neuestes & bestes Modell" },
-  { id: "gpt-5.2-mini", name: "GPT-5.2 Mini", description: "Schnell & sehr leistungsstark" },
-  { id: "gpt-5", name: "GPT-5", description: "Leistungsstärkstes Modell" },
-  { id: "gpt-5-mini", name: "GPT-5 Mini", description: "Schnell & leistungsstark" },
-  // GPT-4.1 Modelle
-  { id: "gpt-4.1", name: "GPT-4.1", description: "Neuestes GPT-4 Modell" },
-  { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", description: "Günstig & leistungsstark" },
-  { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", description: "Schnellstes Modell" },
+  // GPT-5 Modelle (Neu)
+  { id: "gpt-5.2", name: "GPT-5.2", description: "Neuestes Modell" },
+  { id: "gpt-5.1", name: "GPT-5.1", description: "Sehr leistungsstark" },
+  { id: "gpt-5", name: "GPT-5", description: "GPT-5 Basis" },
   // GPT-4o Modelle
-  { id: "gpt-4o", name: "GPT-4o", description: "Multimodal, schnell" },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "Günstig & schnell" },
-  // Reasoning Modelle
-  { id: "o3-mini", name: "o3 Mini", description: "Neues Reasoning-Modell" },
-  { id: "o1", name: "o1", description: "Starkes Reasoning" },
-  { id: "o1-mini", name: "o1 Mini", description: "Schnelles Reasoning" },
-  // Ältere Modelle
-  { id: "gpt-4-turbo", name: "GPT-4 Turbo", description: "Bewährt & stabil" },
-  { id: "gpt-3.5-turbo", name: "GPT-3.5", description: "Günstigste Option" },
+  { id: "gpt-4o", name: "GPT-4o", description: "Bewährt & stabil" },
+  { id: "gpt-4o-mini", name: "GPT-4o Mini", description: "Schnell & günstig" },
 ];
 
 interface MentionSuggestion {
@@ -55,9 +43,62 @@ export default function Chat() {
   } = useAppStore();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
+  // Custom link handler for markdown
+  const handleInternalLink = useCallback((href: string) => {
+    if (!href || href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:")) {
+      return false; // Not an internal link
+    }
+    
+    // It's an internal link - resolve and open
+    let targetPath = href;
+    
+    if (currentProject?.path) {
+      if (!href.startsWith("/")) {
+        targetPath = currentProject.path + "/" + href;
+      } else {
+        targetPath = currentProject.path + href;
+      }
+    }
+    
+    // Add .md extension if not present
+    if (!targetPath.includes(".")) {
+      targetPath += ".md";
+    }
+    
+    console.log("Opening internal link from chat:", targetPath);
+    openFile(targetPath);
+    return true;
+  }, [currentProject, openFile]);
+
+  // Custom markdown components for chat
+  const markdownComponents: Components = useMemo(() => ({
+    a: ({ href, children }) => {
+      const isInternal = href && !href.startsWith("http://") && !href.startsWith("https://") && !href.startsWith("mailto:");
+      
+      return (
+        <a
+          href={href}
+          onClick={(e) => {
+            if (isInternal && href) {
+              e.preventDefault();
+              handleInternalLink(href);
+            }
+          }}
+          className={isInternal ? "text-blue-400 hover:text-blue-300 cursor-pointer underline" : "text-blue-400 hover:text-blue-300 underline"}
+          target={isInternal ? undefined : "_blank"}
+          rel={isInternal ? undefined : "noopener noreferrer"}
+        >
+          {children}
+        </a>
+      );
+    },
+  }), [handleInternalLink]);
+
   // @-mention state
   const [showMentions, setShowMentions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
@@ -80,9 +121,17 @@ export default function Chat() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  // Auto-scroll during streaming (auto = instant, for smooth following)
+  useEffect(() => {
+    if (streamingContent) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [streamingContent]);
 
   // Get all files recursively from file tree
   const getAllFiles = (nodes: FileNode[], basePath: string = ""): MentionSuggestion[] => {
@@ -137,6 +186,29 @@ export default function Chat() {
     }
   }, [selectedMentionIndex, showMentions]);
 
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
+
+  // Simulate streaming display for a text
+  const displayWithStreaming = async (text: string) => {
+    const words = text.split(/(\s+)/);
+    let displayed = "";
+    
+    for (const word of words) {
+      if (abortControllerRef.current?.signal.aborted) {
+        return displayed;
+      }
+      displayed += word;
+      setStreamingContent(displayed);
+      await new Promise(resolve => setTimeout(resolve, 15));
+    }
+    return displayed;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -154,8 +226,13 @@ export default function Chat() {
     setInput("");
     addChatMessage({ role: "user", content: userMessage });
     setIsLoading(true);
+    setStreamingContent("Denkt nach...");
+    
+    // Create abort controller for this request
+    abortControllerRef.current = new AbortController();
 
     try {
+      // Use the original sendChatMessage which handles tools properly
       const response = await sendChatMessage({
         messages: [
           ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -170,41 +247,52 @@ export default function Chat() {
           await refreshFileTree();
           await openFile(filePath);
         },
-        // Called when file is updated directly (without diff mode)
-        onFileUpdated: async (filePath, newContent) => {
+        onFileUpdated: async (filePath, _newContent) => {
           console.log("File updated directly:", filePath);
-          // Check if file is currently open
           const isFileOpen = openFiles.some(f => f.path === filePath);
           if (isFileOpen) {
-            // Close and reopen to force editor refresh with new content
             const { closeFile } = useAppStore.getState();
             closeFile(filePath);
           }
-          // Open the file (will load fresh content from disk)
           await openFile(filePath);
         },
-        // Only use diff mode if enabled
         onProposedChange: diffModeEnabled ? async (change) => {
           console.log("Proposed change:", change);
-          // Add pending change to store
           addPendingChange(change);
-          // Open the file so user can see the diff
           await openFile(change.filePath);
         } : undefined,
       });
 
+      // Display response with streaming effect
+      await displayWithStreaming(response);
+      
+      // Add final message
+      setStreamingContent("");
       addChatMessage({ role: "assistant", content: response });
       
-      // Refresh file tree and reload open files in case any files were created/modified
+      // Refresh file tree and reload open files
       await refreshFileTree();
       await reloadOpenFiles();
     } catch (error) {
+      // If aborted, save partial response if any
+      if (abortControllerRef.current?.signal.aborted) {
+        if (streamingContent && streamingContent !== "Denkt nach...") {
+          addChatMessage({ role: "assistant", content: streamingContent + "\n\n*[Gestoppt]*" });
+        }
+        setStreamingContent("");
+        setIsLoading(false);
+        abortControllerRef.current = null;
+        return;
+      }
+      
+      setStreamingContent("");
       addChatMessage({
         role: "assistant",
         content: `Fehler: ${error instanceof Error ? error.message : "Unbekannter Fehler"}`,
       });
     } finally {
       setIsLoading(false);
+      setStreamingContent("");
     }
   };
 
@@ -335,59 +423,46 @@ export default function Chat() {
           chatMessages.map((message) => (
             <div
               key={message.id}
-              className={`flex gap-3 ${
-                message.role === "user" ? "flex-row-reverse" : ""
-              }`}
+              className={`${message.role === "user" ? "text-right" : ""}`}
             >
               <div
-                className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                  message.role === "user" ? "bg-dark-accent" : "bg-dark-panel"
+                className={`inline-block max-w-[85%] text-left px-4 py-2 rounded-lg ${
+                  message.role === "user"
+                    ? "bg-dark-accent text-white"
+                    : "bg-dark-panel text-dark-text"
                 }`}
               >
-                {message.role === "user" ? (
-                  <User className="w-4 h-4 text-white" />
+                {message.role === "assistant" ? (
+                  <div className="chat-markdown">
+                    <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
+                  </div>
                 ) : (
-                  <Bot className="w-4 h-4 text-dark-accent" />
+                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                 )}
               </div>
-              <div
-                className={`flex-1 min-w-0 ${
-                  message.role === "user" ? "text-right" : ""
-                }`}
-              >
-                <div
-                  className={`inline-block max-w-full text-left px-4 py-2 rounded-lg ${
-                    message.role === "user"
-                      ? "bg-dark-accent text-white"
-                      : "bg-dark-panel text-dark-text"
-                  }`}
-                >
-                  {message.role === "assistant" ? (
-                    <div className="prose prose-invert prose-sm max-w-none">
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  )}
-                </div>
-                <div className="text-xs text-dark-text-muted mt-1">
-                  {new Date(message.timestamp).toLocaleTimeString("de-DE", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </div>
+              <div className={`text-xs text-dark-text-muted mt-1 ${message.role === "user" ? "text-right" : ""}`}>
+                {new Date(message.timestamp).toLocaleTimeString("de-DE", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
               </div>
             </div>
           ))
         )}
         {isLoading && (
-          <div className="flex gap-3">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-dark-panel flex items-center justify-center">
-              <Bot className="w-4 h-4 text-dark-accent" />
-            </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-dark-panel rounded-lg">
-              <Loader2 className="w-4 h-4 animate-spin text-dark-accent" />
-              <span className="text-sm text-dark-text-muted">Denkt nach...</span>
+          <div>
+            <div className="inline-block max-w-[85%] text-left px-4 py-2 rounded-lg bg-dark-panel text-dark-text">
+              {streamingContent ? (
+                <div className="chat-markdown">
+                  <ReactMarkdown components={markdownComponents}>{streamingContent}</ReactMarkdown>
+                  <span className="inline-block w-2 h-4 bg-dark-accent animate-pulse ml-0.5" />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-dark-accent" />
+                  <span className="text-sm text-dark-text-muted">Denkt nach...</span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -445,13 +520,24 @@ export default function Chat() {
             className="flex-1 bg-dark-panel border border-dark-border rounded-lg px-3 py-2 text-sm text-dark-text placeholder-dark-text-muted resize-none focus:outline-none focus:border-dark-accent transition-colors"
             style={{ minHeight: "40px", maxHeight: "120px" }}
           />
-          <button
-            type="submit"
-            disabled={!input.trim() || isLoading}
-            className="px-3 py-2 bg-dark-accent text-white rounded-lg hover:bg-dark-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              title="Stoppen"
+            >
+              <Square className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="px-3 py-2 bg-dark-accent text-white rounded-lg hover:bg-dark-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          )}
         </form>
         {!apiKey && (
           <p className="text-xs text-yellow-500 mt-2">

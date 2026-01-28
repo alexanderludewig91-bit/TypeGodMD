@@ -113,6 +113,7 @@ interface AppState {
   pendingChanges: PendingChange[];
   addPendingChange: (change: Omit<PendingChange, "id" | "timestamp">) => void;
   acceptPendingChange: (id: string) => Promise<void>;
+  acceptPendingChangeWithContent: (id: string, content: string) => Promise<void>;
   rejectPendingChange: (id: string) => void;
   getPendingChangeForFile: (filePath: string) => PendingChange | undefined;
 
@@ -369,7 +370,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   reloadOpenFiles: async () => {
-    const { readTextFile } = await import("../services/fileSystem");
+    const { readTextFile, fileExists } = await import("../services/fileSystem");
     const openFiles = get().openFiles;
     
     const reloadedFiles = await Promise.all(
@@ -380,16 +381,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         
         try {
+          // Check if file still exists
+          const exists = await fileExists(file.path);
+          if (!exists) {
+            // File was deleted, mark for removal
+            return null;
+          }
+          
           const content = await readTextFile(file.path);
           return { ...file, content };
         } catch (error) {
-          console.error("Failed to reload file:", file.path, error);
-          return file;
+          // Silently handle errors for non-existent files
+          console.warn("Could not reload file:", file.path);
+          return null;
         }
       })
     );
     
-    set({ openFiles: reloadedFiles });
+    // Filter out null entries (deleted files)
+    const validFiles = reloadedFiles.filter((f): f is NonNullable<typeof f> => f !== null);
+    set({ openFiles: validFiles });
   },
 
   // Chat
@@ -437,6 +448,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ openFiles, pendingChanges });
     } catch (error) {
       console.error("Failed to accept change:", error);
+    }
+  },
+  acceptPendingChangeWithContent: async (id, content) => {
+    const change = get().pendingChanges.find(c => c.id === id);
+    if (!change) return;
+    
+    try {
+      const { writeTextFile } = await import("../services/fileSystem");
+      await writeTextFile(change.filePath, content);
+      
+      // Update open file if it exists
+      const openFiles = get().openFiles.map(f => 
+        f.path === change.filePath 
+          ? { ...f, content: content, isDirty: false }
+          : f
+      );
+      
+      // Remove the pending change
+      const pendingChanges = get().pendingChanges.filter(c => c.id !== id);
+      
+      set({ openFiles, pendingChanges });
+    } catch (error) {
+      console.error("Failed to accept change with content:", error);
     }
   },
   rejectPendingChange: (id) => {
