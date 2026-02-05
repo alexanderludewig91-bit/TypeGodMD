@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{files, search, web};
+use commands::{files, finder, search, web};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,6 +21,7 @@ pub fn run() {
             search::search_files,
             search::search_content,
             web::web_search,
+            finder::reveal_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

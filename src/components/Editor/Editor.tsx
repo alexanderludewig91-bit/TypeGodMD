@@ -101,10 +101,10 @@ export default function Editor() {
           {openFiles.map((file) => {
             const hasPendingChange = pendingChanges.some(c => c.filePath === file.path);
             return (
-              <button
+              <div
                 key={file.path}
                 onClick={() => setActiveFile(file.path)}
-                className={`flex items-center gap-2 px-4 py-2 border-r border-dark-border text-sm transition-colors ${
+                className={`flex items-center gap-2 px-4 py-2 border-r border-dark-border text-sm transition-colors cursor-pointer ${
                   activeFile === file.path
                     ? "bg-dark-bg text-white"
                     : "bg-dark-sidebar text-dark-text-muted hover:bg-dark-hover"
@@ -126,7 +126,7 @@ export default function Editor() {
                 >
                   <X className="w-3 h-3" />
                 </button>
-              </button>
+              </div>
             );
           })}
         </div>

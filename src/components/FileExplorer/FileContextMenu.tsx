@@ -5,7 +5,9 @@ import {
   Pencil,
   Trash2,
   Info,
+  FolderOpen,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { FileNode, useAppStore } from "../../stores/appStore";
 import {
   createFile,
@@ -208,6 +210,19 @@ export default function FileContextMenu({
     onClose();
   };
 
+  const handleRevealInFinder = async () => {
+    const pathToReveal = node?.path || currentProject?.path;
+    if (!pathToReveal) return;
+
+    try {
+      // Use Tauri command to reveal in Finder
+      await invoke("reveal_in_finder", { path: pathToReveal });
+    } catch (error) {
+      console.error("Error opening Finder:", error);
+    }
+    onClose();
+  };
+
   // Render dialogs
   if (activeDialog === "newFile") {
     return (
@@ -301,6 +316,11 @@ export default function FileContextMenu({
   // Add rename/delete/info options only if a node is selected
   if (node) {
     menuItems.push({ divider: true });
+    menuItems.push({
+      icon: FolderOpen,
+      label: "Im Finder zeigen",
+      onClick: handleRevealInFinder,
+    });
     menuItems.push({
       icon: Info,
       label: "Information",

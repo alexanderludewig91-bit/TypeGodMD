@@ -416,3 +416,70 @@ body {
   content: '▌';
   @apply text-dark-accent animate-pulse;
 }
+
+/* ==================== Office Viewer Styles ==================== */
+
+/* Word Document (docx-preview) */
+.docx-container {
+  @apply bg-gray-100 min-h-full;
+}
+
+.docx-container .docx-wrapper {
+  @apply bg-gray-100 py-8 px-4;
+  max-width: 100%;
+}
+
+.docx-container .docx-wrapper > section.docx {
+  @apply bg-white shadow-lg mx-auto;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  min-height: 297mm; /* A4 height */
+}
+
+/* Excel Table Styling */
+.excel-container {
+  @apply p-4 bg-white min-h-full;
+}
+
+.excel-table {
+  @apply border-collapse text-sm;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.excel-table .excel-corner {
+  @apply bg-gray-200 border border-gray-300 w-10 sticky left-0 top-0 z-20;
+}
+
+.excel-table .excel-col-header {
+  @apply bg-gray-200 border border-gray-300 px-2 py-1 text-center font-medium text-gray-700 min-w-[80px] sticky top-0 z-10;
+}
+
+.excel-table .excel-row-header {
+  @apply bg-gray-200 border border-gray-300 px-2 py-1 text-center font-medium text-gray-700 w-10 sticky left-0;
+}
+
+.excel-table .excel-cell {
+  @apply border border-gray-300 px-2 py-1 text-gray-800 min-w-[80px];
+  background-color: white;
+}
+
+.excel-table .excel-cell:hover {
+  @apply bg-blue-50;
+}
+
+/* Excel table selection highlight */
+.excel-table tr:hover .excel-row-header {
+  @apply bg-blue-100;
+}
+
+/* Sheet tabs styling */
+.excel-sheet-tabs {
+  @apply flex gap-1 bg-gray-200 p-1 rounded-t;
+}
+
+.excel-sheet-tab {
+  @apply px-3 py-1 text-sm rounded-t bg-gray-100 text-gray-600 hover:bg-white cursor-pointer;
+}
+
+.excel-sheet-tab.active {
+  @apply bg-white text-gray-900 font-medium;
+}
